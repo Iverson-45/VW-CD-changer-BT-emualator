@@ -124,9 +124,13 @@ void setup() {
     .data_out_num = 22,
     .data_in_num = I2S_PIN_NO_CHANGE
   };
+  
   a2dp_sink.set_pin_config(pins);
-  a2dp_sink.start("Radio VW");
-
+  
+  // Włączenie automatycznego łączenia z ostatnim urządzeniem
+  a2dp_sink.set_auto_reconnect(true); 
+  
+  a2dp_sink.start("Radio Seat");
 }
 
 void loop() {
@@ -135,7 +139,7 @@ void loop() {
   uint8_t track = 0xFF ^ trackno;
   uint8_t msg[] = {0x34, cd, track, 0xFF, 0xFF, MODE_PLAY, 0xCF, 0x3C};
 
-  if (trackno ==10)
+  if (trackno == 10)
   {
     trackno = 1;
   }
