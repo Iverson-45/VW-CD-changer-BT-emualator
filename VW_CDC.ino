@@ -1,5 +1,5 @@
 #include <SPI.h>
-//#include <btAudio.h>
+#include <ESP_I2S.h>
 #include <Arduino.h>
 #include "BluetoothA2DPSink.h"
 
@@ -13,8 +13,10 @@
 #define SPI_SS   5
 
 #define CD_TIME 1000
+#define DEVICE_NAME "ChangerBT"
 
-BluetoothA2DPSink a2dp_sink;
+I2SClass i2s;
+BluetoothA2DPSink a2dp_sink(i2s);
 
 SPIClass *vspi = NULL;
 
@@ -26,11 +28,6 @@ volatile uint32_t lastEdgeTime = 0;
 
 uint8_t trackno = 1;
 
-void sendAVRCPCommand(uint8_t cmd) {
-  esp_avrc_ct_send_passthrough_cmd(0, cmd, ESP_AVRC_PT_CMD_STATE_PRESSED);
-  delay(50);
-  esp_avrc_ct_send_passthrough_cmd(0, cmd, ESP_AVRC_PT_CMD_STATE_RELEASED);
-}
 
 void IRAM_ATTR handleEdge() {
   uint32_t now = micros();
@@ -94,12 +91,12 @@ void analyzeFrame() {
   for (int i = 0; i < 6; i++) { 
     if (bits[i] == PLAY_NEXT) { 
       trackno++; 
-      sendAVRCPCommand(ESP_AVRC_PT_CMD_FORWARD); 
+      a2dp_sink.next();
       lastActionTime = currentTime;
       break; 
     } else if (bits[i] == PLAY_PREV) { 
       if (trackno > 1) trackno--; 
-      sendAVRCPCommand(ESP_AVRC_PT_CMD_BACKWARD); 
+      a2dp_sink.previous();
       lastActionTime = currentTime;
       break; 
     }
@@ -148,37 +145,31 @@ void radioTaskCode(void * pvParameters) {
 }
 
 void setup() {
-  // 1. Najpierw konfigurujemy piny i SPI dla komunikacji z radiem
-  pinMode(SPI_MISO, INPUT);
-  attachInterrupt(digitalPinToInterrupt(SPI_MISO), handleEdge, CHANGE);
-
-  vspi = new SPIClass(VSPI);
+  vspi = new SPIClass(HSPI);
   vspi->begin(SPI_SCK, SPI_MISO, SPI_MOSI, SPI_SS);
   pinMode(SPI_SS, OUTPUT);
   digitalWrite(SPI_SS, HIGH);
 
-  // 2. Uruchamiamy zadanie symulujące zmieniarkę na rdzeniu 1
+  pinMode(SPI_MISO, INPUT);
+  attachInterrupt(digitalPinToInterrupt(SPI_MISO), handleEdge, CHANGE);
+
   xTaskCreatePinnedToCore(
     radioTaskCode,    // Funkcja zadania
     "RadioTask",      // Nazwa zadania
-    4096,             // Rozmiar stosu w bajtach
+    8192,             // Rozmiar stosu w bajtach
     NULL,             // Parametry wejściowe
     1,                // Priorytet zadania (1 - standardowy)
     &RadioTaskHandle, // Uchwyt do zarządzania zadaniem
     1                 // Przypisanie do rdzenia 1
   );
 
-  // 3. Dopiero teraz konfigurujemy i uruchamiamy Bluetooth
-  // (Inicjalizacja zajmie trochę czasu, ale RadioTask już działa i odpowiada radiu)
-  i2s_pin_config_t pins = {
-    .bck_io_num = 26,
-    .ws_io_num = 25,
-    .data_out_num = 22,
-    .data_in_num = I2S_PIN_NO_CHANGE
-  };
-  a2dp_sink.set_pin_config(pins);
+  i2s.setPins(26, 25, 22);
+    // Inicjalizacja I2S (format standardowego audio CD)
+  i2s.begin(I2S_MODE_STD, 44100, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH);  
+    // Przypisanie początkowej głośności
+  a2dp_sink.set_volume(128);
   a2dp_sink.set_auto_reconnect(true); 
-  a2dp_sink.start("Radio Seat");
+  a2dp_sink.start(DEVICE_NAME);
 }
 
 void loop() {
